@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>在线聊天室</title>
+    <style>
+        body { margin: 0; padding: 20px; background: #f0f2f5; font-family: Arial; }
+        .container { max-width: 800px; margin: 0 auto; }
+        header { background: #1890ff; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; position: relative; }
+        .chat-area { display: flex; gap: 20px; height: 500px; }
+        .users-panel { flex: 1; background: white; padding: 15px; border-radius: 8px; }
+        .chat-panel { flex: 2; background: white; border-radius: 8px; display: flex; flex-direction: column; }
+        .messages { flex: 1; padding: 15px; overflow-y: auto; border-bottom: 1px solid #eee; }
+        .input-area { display: flex; padding: 15px; gap: 10px; }
+        .input-area input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .input-area button { padding: 10px 20px; background: #1890ff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .login-box { max-width: 300px; margin: 100px auto; background: white; padding: 30px; border-radius: 8px; text-align: center; }
+        .login-box input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
+        .login-box button { width: 100%; padding: 10px; background: #1890ff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .message { margin: 10px 0; padding: 8px 12px; border-radius: 4px; max-width: 80%; }
+        .own { background: #1890ff; color: white; margin-left: auto; }
+        .other { background: #f0f0f0; }
+        .system { text-align: center; color: #666; font-style: italic; margin: 5px 0; }
+        .user-item { padding: 8px; border-bottom: 1px solid #eee; display: flex; align-items: center; }
+        .user-status { width: 8px; height: 8px; background: #52c41a; border-radius: 50%; margin-left: auto; }
+        .logout-btn { position: absolute; top: 20px; right: 20px; background: rgba(255,255,255,0.2); color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+    </style>
+</head>
+<body>
+<div id="loginPage" class="login-box">
+    <h2>在线聊天室</h2>
+    <input type="text" id="username" placeholder="用户名" maxlength="20">
+    <button id="loginBtn">进入</button>
+</div>
+
+<div id="chatPage" class="container" style="display:none">
+    <header>
+        <h1>聊天室</h1>
+        <button class="logout-btn" id="logoutBtn">退出</button>
+    </header>
+    <div class="chat-area">
+        <div class="users-panel">
+            <h3>在线用户 (<span id="onlineCount">0</span>)</h3>
+            <div id="usersList"></div>
+        </div>
+
+        <div class="chat-panel">
+            <div class="messages" id="messagesContainer"></div>
+            <div class="input-area">
+                <input type="text" id="messageInput" placeholder="输入消息..." maxlength="500">
+                <button id="sendBtn">发送</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentUser = null;
+    let lastMessageTime = 0;
+
+    const loginPage = document.getElementById('loginPage');
+    const chatPage = document.getElementById('chatPage');
+    const usernameInput = document.getElementById('username');
+    const loginBtn = document.getElementById('loginBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const messagesContainer = document.getElementById('messagesContainer');
+    const usersList = document.getElementById('usersList');
+    const onlineCount = document.getElementById('onlineCount');
+
+    loginBtn.addEventListener('click', login);
+    usernameInput.addEventListener('keypress', e => e.key === 'Enter' && login());
+    sendBtn.addEventListener('click', sendMessage);
+    messageInput.addEventListener('keypress', e => e.key === 'Enter' && sendMessage());
+    logoutBtn.addEventListener('click', logout);
+
+    function login() {
+        const username = usernameInput.value.trim();
+        if (!username) return alert('请输入用户名');
+
+        console.log('尝试登录，用户名:', username);
+
+        // 使用相对路径，避免路径问题
+        fetch('chat/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: `username=${encodeURIComponent(username)}`
+        })
+            .then(response => {
+                console.log('响应状态:', response.status);
+                // 检查响应内容类型
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    return response.text().then(text => {
+                        console.error('期望JSON但收到:', text.substring(0, 100));
+                        throw new Error('服务器返回非JSON响应');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('登录响应数据:', data);
+                if (data.success) {
+                    currentUser = username;
+                    loginPage.style.display = 'none';
+                    chatPage.style.display = 'block';
+                    loadMessages();
+                    setInterval(loadMessages, 2000);
+                } else {
+                    alert(data.message);
+                }
+            })
+            .catch(error => {
+                console.error('登录请求错误:', error);
+                alert('登录失败: ' + error.message);
+            });
+    }
+
+    function sendMessage() {
+        const content = messageInput.value.trim();
+        if (!content) return;
+
+        fetch('chat/send', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: `content=${encodeURIComponent(content)}`
+        })
+            .then(response => {
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    return response.text().then(text => {
+                        throw new Error('服务器返回非JSON响应');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    messageInput.value = '';
+                    loadMessages();
+                } else {
+                    alert(data.message);
+                }
+            })
+            .catch(error => {
+                console.error('发送消息错误:', error);
+                alert('发送失败: ' + error.message);
+            });
+    }
+
+    function loadMessages() {
+        fetch(`chat/messages?lastTime=${lastMessageTime}`)
+            .then(response => {
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    return response.text().then(text => {
+                        console.error('获取消息时收到非JSON响应:', text.substring(0, 100));
+                        throw new Error('服务器返回非JSON响应');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.messages && data.messages.length > 0) {
+                    displayMessages(data.messages);
+                    lastMessageTime = data.lastTime;
+                }
+                if (data.users) updateUsersList(data.users);
+            })
+            .catch(error => {
+                console.error('获取消息错误:', error);
+            });
+    }
+
+    function displayMessages(messages) {
+        messages.forEach(msg => {
+            const div = document.createElement('div');
+            if (msg.type === 'system') {
+                div.className = 'system';
+                div.textContent = msg.content;
+            } else {
+                div.className = `message ${msg.sender === currentUser ? 'own' : 'other'}`;
+                div.innerHTML = `<div style="font-size:12px;opacity:0.8">${msg.sender}</div>${msg.content}`;
+            }
+            messagesContainer.appendChild(div);
+        });
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function updateUsersList(users) {
+        usersList.innerHTML = '';
+        onlineCount.textContent = users.length;
+        users.forEach(user => {
+            const div = document.createElement('div');
+            div.className = 'user-item';
+            div.innerHTML = `${user}<div class="user-status"></div>`;
+            usersList.appendChild(div);
+        });
+    }
+
+    function logout() {
+        fetch('chat/logout', {method: 'POST'})
+            .then(() => {
+                currentUser = null;
+                chatPage.style.display = 'none';
+                loginPage.style.display = 'block';
+                usernameInput.value = '';
+                messagesContainer.innerHTML = '';
+                usersList.innerHTML = '';
+                lastMessageTime = 0;
+            })
+            .catch(error => {
+                console.error('退出错误:', error);
+            });
+    }
+</script>
+</body>
+</html>
